@@ -1,4 +1,6 @@
 import os
+import ipaddress
+from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -26,10 +28,30 @@ class InspectRequest(BaseModel):
 class CookieTextRequest(BaseModel):
     cookies: str
 
+# Blocks file://, ftp://, and private/loopback IP targets to prevent SSRF.
+# Called before any user-supplied URL reaches requests.get() or yt-dlp.
+def _assert_safe_url(url: str) -> None:
+    try:
+        p = urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Malformed URL.")
+    if p.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail=f"URL scheme '{p.scheme}' is not allowed.")
+    host = (p.hostname or "").lower()
+    if not host or host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+        raise HTTPException(status_code=400, detail="Requests to localhost are not allowed.")
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise HTTPException(status_code=400, detail="Requests to private/internal addresses are not allowed.")
+    except ValueError:
+        pass  # hostname, not an IP literal — allow
+
 @app.post("/api/inspect")
 async def inspect_url(req: InspectRequest):
     if not req.url or not req.url.strip():
         raise HTTPException(status_code=400, detail="Please provide a valid URL.")
+    _assert_safe_url(req.url.strip())
     try:
         data = await run_in_threadpool(extract_media_info, req.url.strip())
         return data
@@ -43,9 +65,12 @@ async def handle_download(
     option_type: str = Query(..., alias="type"),
     format_spec: Optional[str] = Query(None),
     direct_url: Optional[str] = Query(None),
-    ext: str = Query("mp4"),
+    ext: str = Query("mp4", pattern=r"^[a-zA-Z0-9]{1,10}$"),
     title: str = Query("media")
 ):
+    _assert_safe_url(url)
+    if direct_url:
+        _assert_safe_url(direct_url)
     try:
         file_path, filename = await run_in_threadpool(
             download_media,
@@ -67,6 +92,8 @@ async def handle_download(
             filename=filename,
             media_type="application/octet-stream"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
@@ -88,7 +115,8 @@ async def get_tunnel_info():
 @app.get("/api/cookies/status")
 async def get_cookies_status():
     has_cookies = os.path.exists(COOKIES_PATH) and os.path.getsize(COOKIES_PATH) > 0
-    return {"active": has_cookies, "path": COOKIES_PATH if has_cookies else None}
+    # Path is intentionally omitted from the response to avoid leaking filesystem layout.
+    return {"active": has_cookies}
 
 @app.post("/api/cookies/save")
 async def save_cookies(req: CookieTextRequest):
