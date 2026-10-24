@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: omnigrab
+    env: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    healthCheckPath: /api/cookies/status
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: 8000
