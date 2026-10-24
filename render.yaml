@@ -3,6 +3,7 @@ services:
     name: omnigrab
     env: docker
     plan: free
+    branch: main
     dockerfilePath: Dockerfile
     healthCheckPath: /api/cookies/status
     autoDeploy: true
