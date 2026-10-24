@@ -86,7 +86,6 @@ def enhance_pinterest_url(image_url: str) -> str:
     return image_url
 
 def extract_pinterest_pin(url: str) -> Optional[Dict[str, Any]]:
-    """Extracts original uncompressed photos and videos from Pinterest pins and pin.it links."""
     try:
         session = requests.Session()
         session.headers.update(HEADERS)
@@ -94,9 +93,12 @@ def extract_pinterest_pin(url: str) -> Optional[Dict[str, Any]]:
         final_url = resp.url
         html = resp.text
 
-        # If it redirected to the Pinterest landing/home page, it's an expired/invalid pin
         if final_url.rstrip("/").endswith("pinterest.com"):
             return None
+
+        # Clean canonical URL
+        pin_match = re.search(r'https?://(?:www\.)?pinterest\.[a-z.]+/pin/(\d+)', final_url)
+        clean_url = f"https://www.pinterest.com/pin/{pin_match.group(1)}/" if pin_match else final_url
 
         parser = MetaParser()
         try:
@@ -145,13 +147,71 @@ def extract_pinterest_pin(url: str) -> Optional[Dict[str, Any]]:
         options: List[Dict[str, Any]] = []
         seen = set()
 
-        # Add videos if available
-        for idx, v_url in enumerate(og_videos):
+        # 1. Check if yt-dlp can extract video streams for this pin
+        try:
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "js_runtimes": {"node": {}},
+                "remote_components": ["ejs:github"],
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                yt_info = ydl.extract_info(clean_url, download=False)
+                if yt_info:
+                    if yt_info.get("title") and ("Pinterest" in title or title == "Pinterest Inspiration"):
+                        title = yt_info["title"]
+                    yt_formats = yt_info.get("formats", [])
+                    sorted_vids = sorted(
+                        [f for f in yt_formats if f.get("vcodec") != "none" and f.get("height")],
+                        key=lambda x: x.get("height") or 0,
+                        reverse=True
+                    )
+                    for f in sorted_vids:
+                        h = f.get("height")
+                        label = f"Video HD ({h}p)" if h else "Video (HD)"
+                        v_url = f.get("url")
+                        if v_url and v_url not in seen:
+                            seen.add(v_url)
+                            options.append({
+                                "id": f"pin_vid_{f.get('format_id')}",
+                                "label": label,
+                                "type": "video",
+                                "quality": f"{h}p" if h else "HD",
+                                "ext": "mp4",
+                                "direct_url": v_url,
+                                "needs_download": True
+                            })
+        except Exception as e:
+            pass
+
+        # 2. Direct regex scan for Pinterest video streams in HTML
+        pin_mp4s = set(re.findall(r'https?://[a-zA-Z0-9.-]*\.pinimg\.com/videos/[^\s"\'\\]+?\.mp4', html))
+        pin_m3u8s = set(re.findall(r'https?://[a-zA-Z0-9.-]*\.pinimg\.com/videos/[^\s"\'\\]+?\.m3u8', html))
+
+        for m3u in pin_m3u8s:
+            mp4_candidate = m3u.replace('/hls/', '/720p/').replace('.m3u8', '.mp4')
+            pin_mp4s.add(mp4_candidate)
+
+        for mp4_url in pin_mp4s:
+            if mp4_url not in seen:
+                seen.add(mp4_url)
+                options.append({
+                    "id": f"pin_vid_direct_{len(options)}",
+                    "label": "Video HD (720p MP4)",
+                    "type": "video",
+                    "quality": "720p HD",
+                    "ext": "mp4",
+                    "direct_url": mp4_url,
+                    "needs_download": True
+                })
+
+        for v_url in og_videos:
             if v_url not in seen:
                 seen.add(v_url)
                 options.append({
-                    "id": f"pin_video_{idx}",
-                    "label": "Original Video (MP4)" if idx == 0 else f"Video {idx+1}",
+                    "id": f"pin_vid_og_{len(options)}",
+                    "label": "Original Video (MP4)",
                     "type": "video",
                     "quality": "Source HD",
                     "ext": "mp4",
@@ -159,7 +219,21 @@ def extract_pinterest_pin(url: str) -> Optional[Dict[str, Any]]:
                     "needs_download": True
                 })
 
-        # Add photos
+        # 3. Add audio option if video exists
+        if any(o["type"] == "video" for o in options):
+            first_vid = next(o for o in options if o["type"] == "video")
+            options.append({
+                "id": "pin_audio_mp3",
+                "label": "Audio Track (MP3 320kbps)",
+                "type": "audio",
+                "quality": "320 kbps MP3",
+                "ext": "mp3",
+                "direct_url": first_vid.get("direct_url"),
+                "format_spec": "bestaudio/best",
+                "needs_download": True
+            })
+
+        # 4. Add photos
         for idx, img in enumerate(ordered_candidates):
             orig_url = enhance_pinterest_url(img)
             if orig_url not in seen:
@@ -196,8 +270,8 @@ def extract_pinterest_pin(url: str) -> Optional[Dict[str, Any]]:
                 "options": options,
                 "raw_info": None
             }
-    except Exception:
-        pass
+    except Exception as e:
+        print("Error:", e)
     return None
 
 def check_direct_content_type(url: str) -> Optional[Dict[str, Any]]:
