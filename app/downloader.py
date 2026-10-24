@@ -126,7 +126,9 @@ def download_media(
     raise RuntimeError("Video download failed to produce a file.")
 
 def cleanup_file(filepath: str):
+    import time
     try:
+        time.sleep(15)
         if os.path.exists(filepath):
             os.remove(filepath)
             parent_dir = os.path.dirname(filepath)

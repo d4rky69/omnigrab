@@ -479,10 +479,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function triggerDownload(option, buttonEl) {
+  async function triggerDownload(option, buttonEl) {
     if (!currentMediaData) return;
-
-    showToast(`Downloading: ${option.label}`, "Processing media & streaming to your device...");
 
     const originalContent = buttonEl.innerHTML;
     buttonEl.disabled = true;
@@ -491,8 +489,10 @@ document.addEventListener("DOMContentLoaded", () => {
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
       </svg>
-      <span>Working...</span>
+      <span>Downloading...</span>
     `;
+
+    showToast(`Downloading: ${option.label}`, "Server is processing & converting media. Please wait...");
 
     const params = new URLSearchParams({
       url: currentMediaData.url,
@@ -510,16 +510,58 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const downloadUrl = `/api/download?${params.toString()}`;
 
-    const iframe = document.createElement("iframe");
-    iframe.style.display = "none";
-    iframe.src = downloadUrl;
-    document.body.appendChild(iframe);
+    try {
+      const res = await fetch(downloadUrl);
+      if (!res.ok) {
+        let errMessage = "Download failed";
+        try {
+          const errData = await res.json();
+          errMessage = errData.detail || errMessage;
+        } catch (_) {
+          errMessage = await res.text();
+        }
+        throw new Error(errMessage);
+      }
 
-    setTimeout(() => {
+      let filename = `${currentMediaData.title}.${option.ext}`;
+      const disposition = res.headers.get("Content-Disposition");
+      if (disposition) {
+        const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+        if (utf8Match && utf8Match[1]) {
+          filename = decodeURIComponent(utf8Match[1]);
+        } else {
+          const regularMatch = /filename="?([^";]+)"?/i.exec(disposition);
+          if (regularMatch && regularMatch[1]) {
+            filename = regularMatch[1];
+          }
+        }
+      }
+
+      showToast("Saving file...", filename);
+
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.style.display = "none";
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+
+      setTimeout(() => {
+        window.URL.revokeObjectURL(blobUrl);
+        a.remove();
+      }, 2000);
+
+      showToast("Download Finished!", `Saved ${filename} to your device.`);
+    } catch (err) {
+      console.error("Download error:", err);
+      showError("Download Failed", err.message || "Failed to download media file.");
+      showToast("Download Failed", err.message || "Error streaming media.");
+    } finally {
       buttonEl.disabled = false;
       buttonEl.innerHTML = originalContent;
-      setTimeout(() => iframe.remove(), 10000);
-    }, 4000);
+    }
   }
 
   function showToast(title, sub) {

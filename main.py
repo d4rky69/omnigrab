@@ -65,8 +65,7 @@ async def handle_download(
         return FileResponse(
             path=file_path,
             filename=filename,
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            media_type="application/octet-stream"
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
