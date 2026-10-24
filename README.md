@@ -1,6 +1,18 @@
 # 🚀 OmniGrab — Universal Media & Photo Downloader
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/d4rky69/omnigrab)
+
 OmniGrab is a high-performance, self-hosted web application capable of extracting and downloading videos, audio tracks, and high-resolution photos from over **1,700+ websites** including **YouTube, Instagram, Pinterest, TikTok, Twitter/X, Reddit, Facebook, Vimeo**, and generic web media.
+
+---
+
+## 🌐 24/7 Free Cloud Hosting (1-Click)
+
+Click the button below to deploy your own permanent 24/7 OmniGrab instance on Render for free (no credit card required):
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/d4rky69/omnigrab)
+
+Or deploy on **[Railway](https://railway.app)** or **[Hugging Face Spaces (Docker)](https://huggingface.co/spaces)**. See [`DEPLOYMENT.md`](DEPLOYMENT.md) for full instructions.
 
 ---
 
